@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8" />
+  <title>قائمة مهام طلابية - Student ToDo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family: "Segoe UI", Tahoma, Arial; padding:18px; background:#f2f5f8;}
+    .card{max-width:720px;margin:12px auto;padding:18px;background:#fff;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06);}
+    h1{margin:0 0 12px;font-size:20px;}
+    input, button, select {padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:6px;font-size:15px;}
+    .row{display:flex;gap:8px;}
+    .row input{flex:1;}
+    button{cursor:pointer;background:#2563eb;color:#fff;border:none;}
+    .tasks{margin-top:14px;}
+    .task{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;border:1px solid #eee;margin-bottom:8px;background:#fbfdff;}
+    .task .left{display:flex;gap:10px;align-items:center;}
+    .small{font-size:13px;color:#666;}
+    .done{text-decoration:line-through;color:#9aa7b2;}
+    .btn-min{background:#ef4444;padding:6px 8px;border-radius:6px;font-size:13px;}
+    .btn-min.secondary{background:#10b981;}
+    footer{font-size:13px;color:#666;margin-top:12px;text-align:center;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>قائمة مهام طلابية • Student To-Do</h1>
+
+    <div>
+      <input id="studentName" placeholder="اسم الطالب (اختياري)" />
+    </div>
+
+    <div class="row">
+      <input id="taskText" placeholder="اكتب المهمة (مثال: مذاكرة فيزياء 3)" />
+      <input type="date" id="dueDate" />
+      <button id="addBtn">Add</button>
+    </div>
+    <div class="small">المهام تحفظ على السحابة (Firestore) وتظهر مباشرة عند أي تغيير.</div>
+
+    <div class="tasks" id="tasksList"></div>
+
+    <footer>Demo: اكتب مهمة واضغط Add → افتح Firebase Console لتشوفها تتسجل.</footer>
+  </div>
+
+<script type="module">
+  // ====== Firebase imports (CDN) ======
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import {
+    getFirestore, collection, addDoc, onSnapshot,
+    doc, updateDoc, deleteDoc, query, orderBy
+  } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+  // ====== ضع هنا إعدادات مشروع Firebase الخاصة بك ======
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  // === تهيئة Firebase و Firestore ===
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const tasksCol = collection(db, "student_todos");
+
+  // === عناصر الواجهة ===
+  const studentNameEl = document.getElementById("studentName");
+  const taskTextEl = document.getElementById("taskText");
+  const dueDateEl = document.getElementById("dueDate");
+  const addBtn = document.getElementById("addBtn");
+  const tasksList = document.getElementById("tasksList");
+
+  // إضافة مهمة جديدة
+  addBtn.addEventListener("click", async () => {
+    const text = taskTextEl.value.trim();
+    const due = dueDateEl.value;
+    const student = studentNameEl.value.trim() || "—";
+
+    if (!text) { alert("اكتب المهمة أولاً"); return; }
+
+    try {
+      await addDoc(tasksCol, {
+        student: student,
+        text: text,
+        due: due || null,
+        createdAt: new Date().toISOString(),
+        done: false
+      });
+      taskTextEl.value = "";
+      dueDateEl.value = "";
+    } catch (e) {
+      console.error("Error adding doc", e);
+      alert("حدث خطأ أثناء الحفظ (راجع الكونسول)");
+    }
+  });
+
+  // استماع real-time للتغييرات (يظهر التحديث تلقائياً)
+  const q = query(tasksCol, orderBy("createdAt", "desc"));
+  onSnapshot(q, (snapshot) => {
+    tasksList.innerHTML = "";
+    snapshot.forEach(docSnap => {
+      const id = docSnap.id;
+      const data = docSnap.data();
+      const taskEl = document.createElement("div");
+      taskEl.className = "task";
+
+      taskEl.innerHTML = `
+        <div class="left">
+          <div>
+            <div style="font-weight:600" class="${data.done ? 'done' : ''}">${escapeHtml(data.text)}</div>
+            <div class="small">الطالب: ${escapeHtml(data.student)} • ${data.due ? 'آخر موعد: ' + escapeHtml(data.due) : 'بدون موعد'}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn-min secondary" data-action="toggle">${data.done ? 'Undo' : 'Done'}</button>
+          <button class="btn-min" data-action="delete">Delete</button>
+        </div>
+      `;
+
+      // أزرار التفاعل
+      taskEl.querySelector('[data-action="toggle"]').addEventListener("click", async (e) => {
+        try {
+          const docRef = doc(db, "student_todos", id);
+          await updateDoc(docRef, { done: !data.done });
+        } catch (err) { console.error(err); alert("خطأ في التعديل"); }
+      });
+
+      taskEl.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+        if (!confirm("تأكيد حذف المهمة؟")) return;
+        try {
+          await deleteDoc(doc(db, "student_todos", id));
+        } catch (err) { console.error(err); alert("خطأ في الحذف"); }
+      });
+
+      tasksList.appendChild(taskEl);
+    });
+
+    if (snapshot.size === 0) {
+      tasksList.innerHTML = <div class="small">لا توجد مهام بعد — أضف أول مهمة!</div>;
+    }
+  });
+
+  // دالة مساعدة لتأمين النصوص عند العرض (XSS basic)
+  function escapeHtml(str){
+    if(!str) return "";
+    return String(str)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+</script>
+</body>
+</html>
